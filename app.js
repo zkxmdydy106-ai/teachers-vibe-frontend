@@ -58,11 +58,30 @@ const App = {
     const page = params.get('page') || 'home';
     const id = params.get('id') || '';
 
-    this.showLoading();
+    const cacheKey = `VIBE_CACHE_${page}_${id}`;
+    const cachedData = localStorage.getItem(cacheKey);
 
+    // 1. 캐시가 있으면 먼저 보여줍니다 (0초 렌더링)
+    if (cachedData) {
+      try {
+        const data = JSON.parse(cachedData);
+        this.renderData(page, data);
+        // 백그라운드에서 최신 데이터를 비동기로 불러와 갱신합니다. (스켈레톤 안 띄움)
+        this.fetchData(page, id, cacheKey, true);
+        return;
+      } catch (e) {
+        console.error("Cache parsing error", e);
+      }
+    }
+
+    // 2. 캐시가 없으면 로딩 화면 띄우고 느긋하게 기다립니다 (최초 1회 3초 소요)
+    this.showLoading();
+    await this.fetchData(page, id, cacheKey, false);
+  },
+
+  fetchData: async function(page, id, cacheKey, isSilent) {
     try {
       const url = `${GAS_API_URL}?page=${page}&id=${id}`;
-      // 서버에서 JSON 데이터를 가져옵니다. GAS의 CORS 리다이렉트를 지원하기 위해 기본 fetch 사용.
       const res = await fetch(url);
       const json = await res.json();
       
@@ -71,18 +90,31 @@ const App = {
       }
 
       const data = json.data;
-      if (data.config && data.config.APP_TITLE) {
-        document.title = data.config.APP_TITLE;
+      
+      // 혹시라도 내용이 똑같으면 재렌더링 하지 않기 위한 비교 (선택사항이나 심플하게 무조건 덮어씌움)
+      const newDataStr = JSON.stringify(data);
+      if (isSilent && localStorage.getItem(cacheKey) === newDataStr) {
+        return; // 바뀐 내용이 없으면 조용히 종료
       }
 
-      if (page === 'home') this.renderHome(data);
-      else if (page === 'tool') this.renderTool(data);
-      else this.renderHome(data);
+      localStorage.setItem(cacheKey, newDataStr);
+      this.renderData(page, data);
 
     } catch (err) {
       console.error(err);
-      this.showError("데이터를 가져올 수 없습니다. 인터넷 설정을 확인하거나 잠시 후 다시 시도해주세요. (" + err.message + ")");
+      if (!isSilent) {
+        this.showError("데이터를 가져올 수 없습니다. 인터넷 설정을 확인하거나 잠시 후 다시 시도해주세요. (" + err.message + ")");
+      }
     }
+  },
+
+  renderData: function(page, data) {
+    if (data.config && data.config.APP_TITLE) {
+      document.title = data.config.APP_TITLE;
+    }
+    if (page === 'home') this.renderHome(data);
+    else if (page === 'tool') this.renderTool(data);
+    else this.renderHome(data);
   },
 
   renderHome: function(data) {
